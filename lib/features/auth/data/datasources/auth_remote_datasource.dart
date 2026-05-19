@@ -2,29 +2,37 @@ import 'package:dio/dio.dart';
 import '../../../../core/constants/api_constants.dart';
 import '../../../../core/errors/exceptions.dart';
 import '../../../../core/network/dio_client.dart';
-import '../../domain/entities/user_entity.dart';
 import '../models/user_model.dart';
 
-/// Remote data source for authentication
-/// Supports both real Supabase API and mock mode for development
+/// Remote data source for authentication — Supabase REST via Dio.
+///
+/// ⚠️ SECURITY DEBT — login dilakukan dengan query langsung ke tabel `users`
+/// (custom auth), BUKAN Supabase Auth. Konsekuensinya:
+///   1. `access_token` yang dikembalikan adalah JWT simulasi
+///      (`simulated_jwt_<uuid>`) → RLS `auth.uid()` tidak bisa jalan.
+///   2. Password dikirim **plaintext** sebagai query string ke PostgREST,
+///      sehingga bisa muncul di log proxy / Dio interceptor logs.
+///   3. Perbandingan password pakai string-equal di SQL — rentan terhadap
+///      timing attack walau di backend Postgres.
+///
+/// Migrasi yang direkomendasikan (urutan):
+///   a. Pindah ke Supabase Auth (`/auth/v1/token?grant_type=password`).
+///   b. Hash semua password existing di DB (bcrypt/argon2) lewat migration.
+///   c. Hash di client memakai algoritma yang sama sebelum kirim.
+///
+/// Sampai migrasi dilakukan, JANGAN aktifkan logging request body/URL untuk
+/// endpoint /users di production.
 class AuthRemoteDataSource {
   final DioClient dioClient;
 
-  /// Set to true to use mock data instead of real API
-  static const bool useMock = false;
-
   AuthRemoteDataSource({required this.dioClient});
 
-  /// Login by querying the public users table
+  /// Login by querying the public users table, memvalidasi kode sekolah dulu.
   Future<Map<String, dynamic>> login({
     required String kodeSekolah,
     required String email,
     required String password,
   }) async {
-    if (useMock) {
-      return _mockLogin(email: email, password: password, role: UserRole.murid);
-    }
-
     try {
       // 1. Validasi Kode Sekolah dan ambil id_sekolah
       final schoolResponse = await dioClient.get(
@@ -35,45 +43,64 @@ class AuthRemoteDataSource {
         },
       );
 
-      final List schoolData = schoolResponse.data is List ? schoolResponse.data : [];
+      final List schoolData =
+          schoolResponse.data is List ? schoolResponse.data : [];
       if (schoolData.isEmpty) {
-        throw const AuthException(message: 'Kode sekolah tidak valid atau tidak terdaftar.');
+        throw const AuthException(
+            message: 'Kode sekolah tidak valid atau tidak terdaftar.');
       }
       final schoolId = schoolData.first['id_sekolah'];
 
-      // 2. Query users table directly based on the provided schema
+      // 2. Query users table — TARIK by email + id_sekolah saja, password
+      //    DIBANDINGKAN DI CLIENT supaya tidak pernah jadi bagian URL/log.
+      //    (URL bisa ke-log di proxy / interceptor / crash report.)
+      final normalizedEmail = email.trim().toLowerCase();
       final response = await dioClient.get(
         ApiConstants.usersTable,
         queryParameters: {
-          'email': 'eq.$email',
-          'password_hash': 'eq.$password',
+          'email': 'eq.$normalizedEmail',
           'id_sekolah': 'eq.$schoolId',
           'select': '*',
+          'limit': '1',
         },
       );
 
       final List data = response.data is List ? response.data : [];
 
-      if (data.isEmpty) {
-        throw const AuthException(message: 'Email atau password salah, atau Anda tidak terdaftar di sekolah ini.');
-      }
+      // Pakai pesan yang sama untuk semua kegagalan kredensial supaya
+      // tidak bocor info "email ada tapi password salah".
+      const credErr = AuthException(
+        message:
+            'Email atau password salah, atau Anda tidak terdaftar di sekolah ini.',
+      );
+
+      if (data.isEmpty) throw credErr;
 
       final user = data.first as Map<String, dynamic>;
+      final storedHash = user['password_hash']?.toString() ?? '';
+
+      // Constant-time compare → tidak rentan terhadap timing attack.
+      if (storedHash.isEmpty || !_constantTimeEquals(storedHash, password)) {
+        throw credErr;
+      }
 
       // Determine role safely
       final roleStr = (user['role']?.toString() ?? 'Siswa').toLowerCase();
-      String mappedRole = 'murid'; // default match UserRole.murid.name
-      if (roleStr.contains('guru')) mappedRole = 'guru';
-      if (roleStr.contains('orang') || roleStr.contains('tua')) mappedRole = 'orangtua';
+      String mappedRole = 'murid';
+      if (roleStr.contains('guru')) {
+        mappedRole = 'guru';
+      } else if (roleStr.contains('orang') || roleStr.contains('tua')) {
+        mappedRole = 'orangtua';
+      }
 
-      // Simulate a JWT token since we're using a custom table instead of Supabase Auth
+      // JWT simulasi — belum Supabase Auth asli.
       return {
         'access_token': 'simulated_jwt_${user['id']}',
         'refresh_token': null,
         'user': {
           'id': user['id'],
           'email': user['email'],
-          'name': user['nama_user'] ?? user['email'], // Field from DB
+          'name': user['nama_user'] ?? user['email'],
           'role': mappedRole,
           'avatar_url': user['foto_profile'],
           'id_sekolah': schoolId?.toString(),
@@ -94,20 +121,16 @@ class AuthRemoteDataSource {
     }
   }
 
-  /// Get current user (mock implementation since we simulate JWT)
+  /// Get current user.
+  /// Saat ini tidak memverifikasi JWT ke Supabase Auth — cukup lempar error
+  /// supaya repository fallback ke data lokal yang sudah di-cache di login.
   Future<UserModel> getUser(String accessToken) async {
-    if (useMock) {
-      return _mockGetUser(accessToken);
-    }
-    
-    // In a real custom JWT scenario, we would verify the token.
-    // For now, if they have a token, we rely on the repository's local cache
     throw const ServerException(message: 'Use local cache', statusCode: 400);
   }
 
-  /// Logout from Supabase
+  /// Logout from Supabase Auth endpoint (no-op kalau token simulasi).
   Future<void> logout(String accessToken) async {
-    if (useMock) return;
+    if (accessToken.startsWith('simulated_jwt_')) return;
 
     try {
       final authDio = dioClient.authDio;
@@ -121,91 +144,22 @@ class AuthRemoteDataSource {
     }
   }
 
-  // ═══════════════════════════════════════════════
-  // ══ MOCK DATA (untuk development/simulasi) ═══
-  // ═══════════════════════════════════════════════
-
-  Future<Map<String, dynamic>> _mockLogin({
-    required String email,
-    required String password,
-    required UserRole role,
-  }) async {
-    // Simulate network delay
-    await Future.delayed(const Duration(milliseconds: 1200));
-
-    // Mock accounts
-    final mockAccounts = {
-      'murid@sekolah.com': {
-        'password': 'password123',
-        'role': 'murid',
-        'name': 'Ahmad Fauzi',
-        'id': 'usr_murid_001',
-      },
-      'orangtua@sekolah.com': {
-        'password': 'password123',
-        'role': 'orangtua',
-        'name': 'Budi Santoso',
-        'id': 'usr_orangtua_001',
-      },
-      'guru@sekolah.com': {
-        'password': 'password123',
-        'role': 'guru',
-        'name': 'Ibu Sari Dewi',
-        'id': 'usr_guru_001',
-      },
-    };
-
-    final account = mockAccounts[email.toLowerCase()];
-
-    if (account == null || account['password'] != password) {
-      throw const AuthException(message: 'Email atau password salah.');
+  /// Konstan-time string comparison.
+  ///
+  /// Penting: panjang string sengaja **tidak** di-early-return supaya waktu
+  /// eksekusi tidak bocorin info length. Tetap aman dipakai walau salah satu
+  /// argumen lebih pendek — beda panjang akan ter-flag lewat XOR + length flag
+  /// di akhir.
+  static bool _constantTimeEquals(String a, String b) {
+    final ab = a.codeUnits;
+    final bb = b.codeUnits;
+    final len = ab.length > bb.length ? ab.length : bb.length;
+    var diff = ab.length ^ bb.length;
+    for (var i = 0; i < len; i++) {
+      final x = i < ab.length ? ab[i] : 0;
+      final y = i < bb.length ? bb[i] : 0;
+      diff |= x ^ y;
     }
-
-    if (account['role'] != role.name) {
-      throw AuthException(
-        message:
-            'Akun ini terdaftar sebagai ${account['role']}, bukan ${role.displayName}.',
-      );
-    }
-
-    return {
-      'access_token': 'mock_jwt_${account['id']}_${DateTime.now().millisecondsSinceEpoch}',
-      'refresh_token': 'mock_refresh_${account['id']}',
-      'token_type': 'bearer',
-      'expires_in': 3600,
-      'user': {
-        'id': account['id'],
-        'email': email,
-        'name': account['name'],
-        'role': account['role'],
-        'avatar_url': null,
-        'created_at': '2025-01-01T00:00:00Z',
-      },
-    };
-  }
-
-  UserModel _mockGetUser(String accessToken) {
-    if (accessToken.contains('murid')) {
-      return const UserModel(
-        id: 'usr_murid_001',
-        email: 'murid@sekolah.com',
-        name: 'Ahmad Fauzi',
-        role: UserRole.murid,
-      );
-    } else if (accessToken.contains('orangtua')) {
-      return const UserModel(
-        id: 'usr_orangtua_001',
-        email: 'orangtua@sekolah.com',
-        name: 'Budi Santoso',
-        role: UserRole.orangtua,
-      );
-    } else {
-      return const UserModel(
-        id: 'usr_guru_001',
-        email: 'guru@sekolah.com',
-        name: 'Ibu Sari Dewi',
-        role: UserRole.guru,
-      );
-    }
+    return diff == 0;
   }
 }

@@ -1,3 +1,4 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import '../../../../core/theme/app_colors.dart';
 
@@ -25,6 +26,47 @@ class DashboardHeader extends StatelessWidget {
     final days = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
     final months = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
     return '${days[now.weekday % 7]}, ${now.day} ${months[now.month - 1]} ${now.year}';
+  }
+
+  Widget _buildAvatar() {
+    final initials = userName.isNotEmpty ? userName[0].toUpperCase() : '?';
+    final fallback = Center(
+      child: Text(
+        initials,
+        style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.w700),
+      ),
+    );
+
+    if (avatarUrl == null || avatarUrl!.isEmpty) {
+      return Container(
+        width: 56, height: 56,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: Colors.white.withOpacity(0.2),
+          border: Border.all(color: Colors.white.withOpacity(0.4), width: 2),
+        ),
+        child: fallback,
+      );
+    }
+
+    return Container(
+      width: 56, height: 56,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: Colors.white.withOpacity(0.2),
+        border: Border.all(color: Colors.white.withOpacity(0.4), width: 2),
+      ),
+      child: ClipOval(
+        child: CachedNetworkImage(
+          imageUrl: avatarUrl!,
+          fit: BoxFit.cover,
+          width: 56,
+          height: 56,
+          placeholder: (_, __) => fallback,
+          errorWidget: (_, __, ___) => fallback,
+        ),
+      ),
+    );
   }
 
   @override
@@ -65,28 +107,7 @@ class DashboardHeader extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: 12),
-                  Container(
-                    width: 56, height: 56,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: Colors.white.withOpacity(0.2),
-                      border: Border.all(color: Colors.white.withOpacity(0.4), width: 2),
-                      image: avatarUrl != null
-                          ? DecorationImage(
-                              image: NetworkImage(avatarUrl!),
-                              fit: BoxFit.cover,
-                            )
-                          : null,
-                    ),
-                    child: avatarUrl == null
-                        ? Center(
-                            child: Text(
-                              userName.isNotEmpty ? userName[0].toUpperCase() : '?',
-                              style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.w700),
-                            ),
-                          )
-                        : null,
-                  ),
+                  _buildAvatar(),
                 ],
               ),
             ],

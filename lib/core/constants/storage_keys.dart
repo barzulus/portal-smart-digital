@@ -11,4 +11,5 @@ class StorageKeys {
   static const String rememberMe = 'remember_me';
   static const String fcmToken = 'fcm_token';
   static const String idSekolah = 'id_sekolah';
+  static const String lastRoute = 'last_route';
 }

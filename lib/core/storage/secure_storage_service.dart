@@ -105,18 +105,34 @@ class SecureStorageService {
     return await _storage.read(key: StorageKeys.fcmToken);
   }
 
+  // ── Last Route (untuk restore state saat app restart) ──
+
+  Future<void> saveLastRoute(String route) async {
+    await _storage.write(key: StorageKeys.lastRoute, value: route);
+  }
+
+  Future<String?> getLastRoute() async {
+    return await _storage.read(key: StorageKeys.lastRoute);
+  }
+
   // ── Clear All ──
 
   Future<void> clearAll() async {
     await _storage.deleteAll();
   }
 
-  /// Clear session data but keep remember-me preferences
+  /// Clear session data but keep remember-me preferences (email + flag).
+  ///
+  /// Penting: `lastRoute` dan `userRole` JUGA dihapus supaya saat user
+  /// lain login (atau user yang sama dengan role berbeda), tidak ada
+  /// kebocoran route lintas-sesi.
   Future<void> clearSession() async {
     await _storage.delete(key: StorageKeys.accessToken);
     await _storage.delete(key: StorageKeys.refreshToken);
     await _storage.delete(key: StorageKeys.userId);
     await _storage.delete(key: StorageKeys.userName);
+    await _storage.delete(key: StorageKeys.userRole);
     await _storage.delete(key: StorageKeys.idSekolah);
+    await _storage.delete(key: StorageKeys.lastRoute);
   }
 }

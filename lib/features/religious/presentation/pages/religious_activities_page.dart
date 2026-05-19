@@ -11,20 +11,60 @@ class ReligiousActivitiesPage extends ConsumerWidget {
     final activitiesAsync = ref.watch(religiousActivitiesProvider);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Kegiatan Keagamaan')),
-      body: activitiesAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(child: Text('Error: $e')),
-        data: (activities) {
-          final grouped = <String, List<ReligiousActivity>>{};
-          for (final a in activities) {
-            grouped.putIfAbsent(a.category, () => []).add(a);
-          }
+      backgroundColor: AppColors.scaffoldBg,
+      appBar: AppBar(
+        title: const Text('Kegiatan Keagamaan'),
+        backgroundColor: Colors.white,
+        foregroundColor: AppColors.textPrimary,
+        elevation: 0,
+        surfaceTintColor: Colors.transparent,
+      ),
+      body: RefreshIndicator(
+        onRefresh: () async {
+          ref.invalidate(religiousActivitiesProvider);
+          await ref.read(religiousActivitiesProvider.future);
+        },
+        child: activitiesAsync.when(
+          loading: () => const Center(child: CircularProgressIndicator()),
+          error: (e, _) => Center(
+            child: Padding(
+              padding: const EdgeInsets.all(32),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.error_outline_rounded, size: 48, color: AppColors.error),
+                  const SizedBox(height: 12),
+                  const Text('Gagal memuat kegiatan'),
+                  const SizedBox(height: 16),
+                  ElevatedButton(
+                    onPressed: () => ref.invalidate(religiousActivitiesProvider),
+                    child: const Text('Coba Lagi'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          data: (activities) {
+            if (activities.isEmpty) {
+              return ListView(
+                children: [
+                  const SizedBox(height: 100),
+                  Center(
+                    child: Column(
+                      children: [
+                        Icon(Icons.mosque_rounded, size: 64, color: AppColors.textMuted.withOpacity(0.4)),
+                        const SizedBox(height: 16),
+                        const Text('Belum ada kegiatan keagamaan',
+                            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
+                      ],
+                    ),
+                  ),
+                ],
+              );
+            }
 
-          return SingleChildScrollView(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            return ListView(
+              padding: const EdgeInsets.all(16),
               children: [
                 // Hero card
                 Container(
@@ -45,28 +85,16 @@ class ReligiousActivitiesPage extends ConsumerWidget {
                     Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                       const Text('Program Keagamaan', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w700)),
                       const SizedBox(height: 4),
-                      Text('${activities.length} kegiatan terjadwal', style: TextStyle(color: Colors.white.withOpacity(0.8), fontSize: 13)),
+                      Text('${activities.length} kegiatan tersedia', style: TextStyle(color: Colors.white.withOpacity(0.8), fontSize: 13)),
                     ])),
                   ]),
                 ),
-                const SizedBox(height: 24),
-                ...grouped.entries.map((entry) => Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(children: [
-                      Container(width: 4, height: 18, decoration: BoxDecoration(color: AppColors.keagamaanColor, borderRadius: BorderRadius.circular(2))),
-                      const SizedBox(width: 8),
-                      Text(entry.key, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
-                    ]),
-                    const SizedBox(height: 10),
-                    ...entry.value.map((a) => _ActivityCard(activity: a)),
-                    const SizedBox(height: 16),
-                  ],
-                )),
+                const SizedBox(height: 20),
+                ...activities.map((a) => _ActivityCard(activity: a)),
               ],
-            ),
-          );
-        },
+            );
+          },
+        ),
       ),
     );
   }
@@ -79,9 +107,10 @@ class _ActivityCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      margin: const EdgeInsets.only(bottom: 8),
+      margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
-        color: Colors.white, borderRadius: BorderRadius.circular(14),
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
         boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8, offset: const Offset(0, 2))],
       ),
       child: Padding(
@@ -90,35 +119,39 @@ class _ActivityCard extends StatelessWidget {
           Container(
             width: 42, height: 42,
             decoration: BoxDecoration(color: AppColors.keagamaanColor.withOpacity(0.1), borderRadius: BorderRadius.circular(11)),
-            child: Icon(
-              activity.isMandatory ? Icons.star_rounded : Icons.star_border_rounded,
-              color: AppColors.keagamaanColor, size: 22,
-            ),
+            child: const Icon(Icons.mosque_rounded, color: AppColors.keagamaanColor, size: 22),
           ),
           const SizedBox(width: 12),
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Row(children: [
-              Expanded(child: Text(activity.title, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600))),
-              if (activity.isMandatory)
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                  decoration: BoxDecoration(color: AppColors.error.withOpacity(0.1), borderRadius: BorderRadius.circular(4)),
-                  child: Text('Wajib', style: TextStyle(fontSize: 9, fontWeight: FontWeight.w600, color: AppColors.error)),
-                ),
-            ]),
+            Text(activity.title, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                maxLines: 1, overflow: TextOverflow.ellipsis),
+            if (activity.description.isNotEmpty) ...[
+              const SizedBox(height: 2),
+              Text(activity.description, style: const TextStyle(fontSize: 11, color: AppColors.textSecondary),
+                  maxLines: 1, overflow: TextOverflow.ellipsis),
+            ],
             const SizedBox(height: 4),
             Row(children: [
-              Icon(Icons.schedule, size: 12, color: AppColors.textMuted),
+              if (activity.time != null && activity.time!.isNotEmpty) ...[
+                const Icon(Icons.schedule, size: 12, color: AppColors.textMuted),
+                const SizedBox(width: 4),
+                Text(activity.time!, style: const TextStyle(fontSize: 11, color: AppColors.textMuted)),
+                const SizedBox(width: 10),
+              ],
+              const Icon(Icons.location_on_outlined, size: 12, color: AppColors.textMuted),
               const SizedBox(width: 4),
-              Text('${activity.day} • ${activity.time}', style: TextStyle(fontSize: 11, color: AppColors.textMuted)),
-            ]),
-            const SizedBox(height: 2),
-            Row(children: [
-              Icon(Icons.location_on_outlined, size: 12, color: AppColors.textMuted),
-              const SizedBox(width: 4),
-              Text(activity.location, style: TextStyle(fontSize: 11, color: AppColors.textMuted)),
+              Flexible(child: Text(activity.location, style: const TextStyle(fontSize: 11, color: AppColors.textMuted),
+                  overflow: TextOverflow.ellipsis)),
             ]),
           ])),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: AppColors.keagamaanColor.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Text(activity.status, style: const TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: AppColors.keagamaanColor)),
+          ),
         ]),
       ),
     );

@@ -1,4 +1,5 @@
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../constants/api_constants.dart';
 import 'auth_interceptor.dart';
@@ -34,15 +35,19 @@ class DioClient {
       ),
     );
 
-    // Add interceptors
-    dio.interceptors.addAll([
-      AuthInterceptor(storageService: storageService),
-      LogInterceptor(
-        requestBody: true,
-        responseBody: true,
-        logPrint: (obj) => print('🌐 DIO: $obj'),
-      ),
-    ]);
+    // Add interceptors. LogInterceptor hanya aktif di debug build —
+    // request body/URL bisa berisi password (custom auth via /users) atau
+    // token, jadi JANGAN aktifkan di release.
+    dio.interceptors.add(AuthInterceptor(storageService: storageService));
+    if (kDebugMode) {
+      dio.interceptors.add(
+        LogInterceptor(
+          requestBody: true,
+          responseBody: true,
+          logPrint: (obj) => debugPrint('🌐 DIO: $obj'),
+        ),
+      );
+    }
   }
 
   /// Create a separate Dio instance for Auth API calls
@@ -63,13 +68,15 @@ class DioClient {
       ),
     );
 
-    authDio.interceptors.add(
-      LogInterceptor(
-        requestBody: true,
-        responseBody: true,
-        logPrint: (obj) => print('🔐 AUTH: $obj'),
-      ),
-    );
+    if (kDebugMode) {
+      authDio.interceptors.add(
+        LogInterceptor(
+          requestBody: true,
+          responseBody: true,
+          logPrint: (obj) => debugPrint('🔐 AUTH: $obj'),
+        ),
+      );
+    }
 
     return authDio;
   }

@@ -17,8 +17,10 @@ dependencies:
   # Network
   dio: ^5.7.0
 
-  # Storage
+  # Storage (offline cache)
   flutter_secure_storage: ^9.2.4
+  path_provider: ^2.1.5
+  sqflite: ^2.3.0
 
   # Routing
   go_router: ^14.8.1
@@ -33,9 +35,21 @@ dependencies:
   cached_network_image: ^3.4.1
   flutter_animate: ^4.5.2
 
+  # Location & Camera
+  geolocator: ^13.0.2
+  image_picker: ^1.1.2
+  file_picker: ^8.0.0
+  permission_handler: ^11.3.1
+
+  # Attendance scanning
+  mobile_scanner: ^5.2.3
+  nfc_manager: ^4.2.1
+
   # Utils
   equatable: ^2.0.7
-  intl: ^0.19.0
+  intl: ^0.20.2
+  flutter_localizations:
+    sdk: flutter
   flutter_local_notifications: ^18.0.1
   json_annotation: ^4.9.0
   webview_flutter: ^4.13.1

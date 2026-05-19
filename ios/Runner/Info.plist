@@ -66,5 +66,15 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<key>NSCameraUsageDescription</key>
+	<string>Aplikasi memerlukan kamera untuk memindai QR code absensi siswa.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Aplikasi memerlukan lokasi untuk memvalidasi absensi guru di area sekolah.</string>
+	<key>NFCReaderUsageDescription</key>
+	<string>Aplikasi memerlukan akses NFC untuk membaca kartu RFID siswa saat absensi.</string>
+	<key>com.apple.developer.nfc.readersession.formats</key>
+	<array>
+		<string>TAG</string>
+	</array>
 </dict>
 </plist>

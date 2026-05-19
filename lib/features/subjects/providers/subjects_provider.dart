@@ -1,7 +1,16 @@
+import 'dart:convert';
+
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-/// Subject/Mata Pelajaran model
+import '../../../core/constants/api_constants.dart';
+import '../../../core/network/dio_client.dart';
+import '../../../core/storage/offline_cache_service.dart';
+import '../../../core/theme/app_colors.dart';
+import '../../auth/presentation/providers/auth_provider.dart';
+
+/// Subject/Mata Pelajaran model — diambil dari jadwal_pembelajaran_v2.
 class SubjectData {
   final String id;
   final String name;
@@ -20,35 +29,137 @@ class SubjectData {
     required this.room,
     required this.color,
   });
+
+  factory SubjectData.fromJson(Map<String, dynamic> json) {
+    final mataPelajaran = json['mata_pelajaran']?.toString() ?? '';
+    final colors = [
+      AppColors.pelajaranColor,
+      AppColors.kehadiranColor,
+      AppColors.tugasColor,
+      AppColors.ujianColor,
+      AppColors.perpustakaanColor,
+      AppColors.info,
+      AppColors.secondary,
+    ];
+    final color = colors[mataPelajaran.hashCode.abs() % colors.length];
+
+    final jamMulai = json['jam_mulai']?.toString() ?? '';
+    final jamSelesai = json['jam_selesai']?.toString() ?? '';
+    String formatTime(String t) => t.length > 5 ? t.substring(0, 5) : t;
+
+    return SubjectData(
+      id: json['id']?.toString() ?? '',
+      name: mataPelajaran,
+      teacher: json['guru']?.toString() ?? '',
+      day: json['hari']?.toString() ?? '',
+      time: '${formatTime(jamMulai)} - ${formatTime(jamSelesai)}',
+      room: json['ruangan']?.toString() ?? '',
+      color: color,
+    );
+  }
 }
 
-/// Provider for subjects
+const _dayOrder = {
+  'senin': 0, 'selasa': 1, 'rabu': 2, 'kamis': 3,
+  'jumat': 4, 'sabtu': 5, 'minggu': 6,
+};
+
+/// Fetch jadwal pelajaran siswa dari tabel jadwal_pembelajaran_v2.
+/// Filter by id_sekolah + kelas siswa yang login.
 final subjectsProvider = FutureProvider<List<SubjectData>>((ref) async {
-  await Future.delayed(const Duration(milliseconds: 400));
-  return [
-    SubjectData(id: '1', name: 'Matematika', teacher: 'Bu Sari Dewi, M.Pd', day: 'Senin', time: '07:30 - 09:00', room: 'Kelas VII-A', color: const Color(0xFF5C6BC0)),
-    SubjectData(id: '2', name: 'Bahasa Indonesia', teacher: 'Pak Hendra, S.Pd', day: 'Senin', time: '09:15 - 10:45', room: 'Kelas VII-A', color: const Color(0xFF26A69A)),
-    SubjectData(id: '3', name: 'Bahasa Inggris', teacher: 'Mrs. Sarah Johnson, M.A', day: 'Selasa', time: '07:30 - 09:00', room: 'Lab Bahasa', color: const Color(0xFF42A5F5)),
-    SubjectData(id: '4', name: 'IPA (Fisika)', teacher: 'Pak Andi, M.Si', day: 'Selasa', time: '09:15 - 10:45', room: 'Lab IPA', color: const Color(0xFFFF7043)),
-    SubjectData(id: '5', name: 'IPA (Biologi)', teacher: 'Bu Rina, M.Si', day: 'Rabu', time: '07:30 - 09:00', room: 'Lab IPA', color: const Color(0xFF66BB6A)),
-    SubjectData(id: '6', name: 'IPS', teacher: 'Pak Dimas, S.Pd', day: 'Rabu', time: '09:15 - 10:45', room: 'Kelas VII-A', color: const Color(0xFFAB47BC)),
-    SubjectData(id: '7', name: 'Pendidikan Agama Islam', teacher: 'Ustadz Ahmad, Lc', day: 'Kamis', time: '07:30 - 09:00', room: 'Musholla', color: const Color(0xFF8D6E63)),
-    SubjectData(id: '8', name: 'Seni Budaya', teacher: 'Bu Maya, S.Sn', day: 'Kamis', time: '09:15 - 10:45', room: 'Ruang Seni', color: const Color(0xFFEC407A)),
-    SubjectData(id: '9', name: 'PJOK', teacher: 'Pak Budi, S.Pd', day: 'Jumat', time: '07:30 - 09:00', room: 'Lapangan', color: const Color(0xFFFFA726)),
-    SubjectData(id: '10', name: 'Informatika', teacher: 'Pak Rizki, S.Kom', day: 'Jumat', time: '09:15 - 10:45', room: 'Lab Komputer', color: const Color(0xFF29B6F6)),
-  ];
+  final idSekolah = ref.watch(currentIdSekolahProvider);
+  final user = ref.watch(authProvider).user;
+  if (idSekolah == null || user == null) return const [];
+
+  final cache = ref.watch(offlineCacheServiceProvider);
+  final kelasKey = 'student_kelas_${user.email}_$idSekolah';
+
+  // Lookup kelas siswa — cache hasilnya untuk offline
+  String? kelas;
+  try {
+    final dio = ref.watch(dioClientProvider);
+    final studentRes = await dio.get(
+      ApiConstants.studentsTable,
+      queryParameters: {
+        'id_sekolah': 'eq.$idSekolah',
+        'email': 'eq.${user.email}',
+        'select': 'kelas',
+        'limit': '1',
+      },
+    );
+    final List studentData = studentRes.data is List ? studentRes.data : [];
+    if (studentData.isNotEmpty) {
+      kelas = (studentData.first as Map<String, dynamic>)['kelas']?.toString();
+      if (kelas != null && kelas.isNotEmpty) {
+        await cache.cacheResponse(kelasKey, kelas);
+      }
+    }
+  } catch (_) {
+    // Offline — restore kelas dari cache
+    kelas = await cache.getCachedResponse(kelasKey);
+  }
+
+  if (kelas == null || kelas.isEmpty) return const [];
+
+  final cacheKey = 'subjects_${idSekolah}_$kelas';
+
+  try {
+    final dio = ref.watch(dioClientProvider);
+    final res = await dio.get(
+      ApiConstants.jadwalPelajaranV2Table,
+      queryParameters: {
+        'id_sekolah': 'eq.$idSekolah',
+        'kelas': 'eq.$kelas',
+        'select': '*',
+        'order': 'jam_mulai.asc',
+      },
+    );
+
+    final List data = res.data is List ? res.data : [];
+    await cache.cacheResponse(cacheKey, jsonEncode(data));
+    final subjects = data
+        .map((json) => SubjectData.fromJson(json as Map<String, dynamic>))
+        .toList();
+
+    subjects.sort((a, b) {
+      final dayA = _dayOrder[a.day.toLowerCase()] ?? 99;
+      final dayB = _dayOrder[b.day.toLowerCase()] ?? 99;
+      if (dayA != dayB) return dayA.compareTo(dayB);
+      return a.time.compareTo(b.time);
+    });
+
+    return subjects;
+  } on DioException catch (e) {
+    // Offline — try cache
+    final cached = await cache.getCachedResponse(cacheKey);
+    if (cached != null) {
+      final List decoded = jsonDecode(cached);
+      final subjects = decoded
+          .map((json) => SubjectData.fromJson(json as Map<String, dynamic>))
+          .toList();
+      subjects.sort((a, b) {
+        final dayA = _dayOrder[a.day.toLowerCase()] ?? 99;
+        final dayB = _dayOrder[b.day.toLowerCase()] ?? 99;
+        if (dayA != dayB) return dayA.compareTo(dayB);
+        return a.time.compareTo(b.time);
+      });
+      return subjects;
+    }
+    if (e.response?.statusCode == 404) return const [];
+    throw Exception('Gagal memuat jadwal: ${e.message ?? 'tidak diketahui'}');
+  }
 });
 
-/// Today's schedule
+/// Today's schedule for student.
 final todayScheduleProvider = Provider<List<SubjectData>>((ref) {
-  final dayNames = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'];
+  const dayNames = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'];
   final now = DateTime.now();
   final todayName = dayNames[now.weekday - 1];
 
   final subjectsAsync = ref.watch(subjectsProvider);
   return subjectsAsync.when(
-    data: (subjects) => subjects.where((s) => s.day == todayName).toList(),
-    loading: () => [],
-    error: (_, __) => [],
+    data: (subjects) => subjects.where((s) => s.day.toLowerCase() == todayName.toLowerCase()).toList(),
+    loading: () => const [],
+    error: (_, __) => const [],
   );
 });

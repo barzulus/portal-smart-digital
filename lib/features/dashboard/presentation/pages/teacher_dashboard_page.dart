@@ -2,11 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../../core/theme/app_colors.dart';
-import '../../../../core/constants/api_constants.dart';
+import '../../../announcements/presentation/pages/announcements_page.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
+import '../../../auth/presentation/providers/guru_staff_provider.dart';
 import '../../../announcements/providers/announcements_provider.dart';
 import '../../../students/providers/students_provider.dart';
 import '../../../schedule/providers/schedule_provider.dart';
+import '../../../tugas_harian/providers/tugas_harian_provider.dart';
 import '../widgets/dashboard_header.dart';
 import '../widgets/menu_grid_item.dart';
 import '../widgets/dashboard_slider.dart';
@@ -22,6 +24,8 @@ class TeacherDashboardPage extends ConsumerWidget {
     final myClasses = ref.watch(teacherClassesProvider);
     final todayAsync = ref.watch(todayScheduleProvider);
     final weeklyAsync = ref.watch(weeklyScheduleProvider);
+    final activeTugas = ref.watch(activeTugasCountProvider);
+    final guruPhotoAsync = ref.watch(guruPhotoUrlProvider);
     
     final totalSiswa = myStudents.maybeWhen(
       data: (students) => students.length.toString(),
@@ -49,8 +53,11 @@ class TeacherDashboardPage extends ConsumerWidget {
             children: [
               DashboardHeader(
                 userName: user?.name ?? 'Guru',
-                avatarUrl: user?.avatarUrl ?? (user?.id != null ? '${ApiConstants.supabaseUrl}/storage/v1/object/public/student-photos/${user!.id}.jpg' : null),
-                subtitle: 'NIP: 19800101 200501 1 001  •  Wali Kelas VII-A',
+                avatarUrl: guruPhotoAsync.maybeWhen(
+                  data: (url) => url,
+                  orElse: () => user?.avatarUrl,
+                ),
+                subtitle: '$totalKelas Kelas  •  $totalSiswa Siswa',
                 roleColor: AppColors.guruColor,
               ),
               
@@ -68,7 +75,7 @@ class TeacherDashboardPage extends ConsumerWidget {
                       const SizedBox(width: 10),
                       _StatMini(icon: Icons.class_rounded, label: 'Kelas', value: totalKelas, color: AppColors.kehadiranColor),
                       const SizedBox(width: 10),
-                      _StatMini(icon: Icons.assignment, label: 'Tugas Aktif', value: '6', color: AppColors.tugasColor),
+                      _StatMini(icon: Icons.assignment, label: 'Tugas Aktif', value: '$activeTugas', color: AppColors.tugasColor),
                     ]),
 
                   const SizedBox(height: 24),
@@ -84,8 +91,11 @@ class TeacherDashboardPage extends ConsumerWidget {
                       MenuGridItem(icon: Icons.edit_note_rounded, label: 'Input Nilai', gradient: AppColors.tugasGradient, onTap: () => context.push('/grades')),
                       MenuGridItem(icon: Icons.fact_check_rounded, label: 'Absensi', gradient: AppColors.kehadiranGradient, onTap: () => context.push('/teacher-attendance')),
                       MenuGridItem(icon: Icons.campaign_rounded, label: 'Pengumuman', gradient: AppColors.pengumumanGradient, onTap: () => context.go('/announcements')),
-                      MenuGridItem(icon: Icons.assignment_rounded, label: 'Tugas', gradient: AppColors.ujianGradient, onTap: () {}),
-                      MenuGridItem(icon: Icons.quiz_rounded, label: 'Ujian', gradient: AppColors.keagamaanGradient, onTap: () {}),
+                      MenuGridItem(icon: Icons.assignment_rounded, label: 'Tugas', gradient: AppColors.tugasGradient, onTap: () => context.push('/tugas-harian')),
+                      MenuGridItem(icon: Icons.quiz_rounded, label: 'Ujian', gradient: AppColors.ujianGradient, onTap: () => context.push('/teacher-exams')),
+                      MenuGridItem(icon: Icons.event_note_rounded, label: 'Agenda', gradient: AppColors.keagamaanGradient, onTap: () => context.push('/agenda-guru')),
+                      MenuGridItem(icon: Icons.mosque_rounded, label: 'Keagamaan', gradient: AppColors.perpustakaanGradient, onTap: () => context.push('/kegiatan-keagamaan')),
+                      MenuGridItem(icon: Icons.fingerprint_rounded, label: 'Absen Guru', gradient: AppColors.absenGuruGradient, onTap: () => context.push('/teacher-self-attendance')),
                     ],
                   ),
 
@@ -320,26 +330,87 @@ class TeacherDashboardPage extends ConsumerWidget {
                     error: (_, __) => const SizedBox(),
                     data: (list) => Column(
                       children: list.take(3).map((a) {
-                        Color c;
-                        switch (a.category) {
-                          case AnnouncementCategory.important: c = AppColors.error; break;
-                          case AnnouncementCategory.event: c = AppColors.secondary; break;
-                          case AnnouncementCategory.info: c = AppColors.info; break;
-                        }
-                        return Container(
-                          margin: const EdgeInsets.only(bottom: 10),
-                          padding: const EdgeInsets.all(14),
-                          decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14),
-                            boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 6, offset: const Offset(0, 2))]),
-                          child: Row(children: [
-                            Container(width: 4, height: 40, decoration: BoxDecoration(color: c, borderRadius: BorderRadius.circular(2))),
-                            const SizedBox(width: 12),
-                            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                              Text(a.title, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600), maxLines: 1, overflow: TextOverflow.ellipsis),
-                              const SizedBox(height: 3),
-                              Text(a.timeAgo, style: const TextStyle(fontSize: 11, color: AppColors.textMuted)),
-                            ])),
-                          ]),
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 10),
+                          child: Material(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(14),
+                            elevation: 0,
+                            child: InkWell(
+                              borderRadius: BorderRadius.circular(14),
+                              onTap: () => showAnnouncementDetail(context, a),
+                              child: Container(
+                                padding: const EdgeInsets.all(14),
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(14),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.black.withOpacity(0.03),
+                                      blurRadius: 6,
+                                      offset: const Offset(0, 2),
+                                    ),
+                                  ],
+                                ),
+                                child: Row(
+                                  children: [
+                                    Container(
+                                      width: 4,
+                                      height: 40,
+                                      decoration: BoxDecoration(
+                                        color: AppColors.primary,
+                                        borderRadius:
+                                            BorderRadius.circular(2),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            a.judul,
+                                            style: const TextStyle(
+                                              fontSize: 13,
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                            maxLines: 1,
+                                            overflow:
+                                                TextOverflow.ellipsis,
+                                          ),
+                                          const SizedBox(height: 3),
+                                          Text(
+                                            a.timeAgo,
+                                            style: const TextStyle(
+                                              fontSize: 11,
+                                              color: AppColors.textMuted,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    if (a.hasAttachment)
+                                      Padding(
+                                        padding: const EdgeInsets.only(
+                                          right: 4,
+                                        ),
+                                        child: Icon(
+                                          Icons.attach_file_rounded,
+                                          size: 14,
+                                          color: AppColors.info
+                                              .withOpacity(0.7),
+                                        ),
+                                      ),
+                                    const Icon(
+                                      Icons.chevron_right_rounded,
+                                      size: 18,
+                                      color: AppColors.textMuted,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
                         );
                       }).toList(),
                     ),

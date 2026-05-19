@@ -7,6 +7,7 @@ import '../../../auth/presentation/providers/auth_provider.dart';
 import '../../../assignments/providers/assignments_provider.dart';
 import '../../../exams/providers/exams_provider.dart';
 import '../../../attendance/providers/attendance_provider.dart';
+import '../../../announcements/presentation/pages/announcements_page.dart';
 import '../../../announcements/providers/announcements_provider.dart';
 import '../../../subjects/providers/subjects_provider.dart';
 import '../../../library/providers/library_provider.dart';
@@ -28,15 +29,23 @@ class StudentDashboardPage extends ConsumerWidget {
     final activeLoans = ref.watch(activeLoanCountProvider);
 
     return Scaffold(
-      body: SingleChildScrollView(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
+      body: RefreshIndicator(
+        onRefresh: () async {
+          ref.invalidate(subjectsProvider);
+          ref.invalidate(announcementsProvider);
+          ref.invalidate(assignmentsProvider);
+          ref.invalidate(examsProvider);
+        },
+        child: SingleChildScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
             // ── Header ──
             DashboardHeader(
               userName: user?.name ?? 'Siswa',
               avatarUrl: user?.avatarUrl ?? (user?.id != null ? '${ApiConstants.supabaseUrl}/storage/v1/object/public/student-photos/${user!.id}.jpg' : null),
-              subtitle: 'Kelas VII-A  •  Semester Genap 2025/2026',
+              subtitle: user?.role.displayName ?? 'Siswa',
               roleColor: AppColors.primary,
             ),
 
@@ -228,33 +237,30 @@ class StudentDashboardPage extends ConsumerWidget {
                       final recent = announcements.take(2).toList();
                       return Column(
                         children: recent.map((a) {
-                          Color catColor;
-                          switch (a.category) {
-                            case AnnouncementCategory.important: catColor = AppColors.error; break;
-                            case AnnouncementCategory.event: catColor = AppColors.secondary; break;
-                            case AnnouncementCategory.info: catColor = AppColors.info; break;
-                          }
-                          return Container(
-                            margin: const EdgeInsets.only(bottom: 10),
-                            padding: const EdgeInsets.all(14),
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(14),
-                              boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 6, offset: const Offset(0, 2))],
-                            ),
-                            child: Row(children: [
-                              Container(
-                                width: 4, height: 40,
-                                decoration: BoxDecoration(color: catColor, borderRadius: BorderRadius.circular(2)),
+                          return GestureDetector(
+                            onTap: () => showAnnouncementDetail(context, a),
+                            child: Container(
+                              margin: const EdgeInsets.only(bottom: 10),
+                              padding: const EdgeInsets.all(14),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(14),
+                                boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 6, offset: const Offset(0, 2))],
                               ),
-                              const SizedBox(width: 12),
-                              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                                Text(a.title, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600), maxLines: 1, overflow: TextOverflow.ellipsis),
-                                const SizedBox(height: 3),
-                                Text(a.timeAgo, style: TextStyle(fontSize: 11, color: AppColors.textMuted)),
-                              ])),
-                              Icon(Icons.chevron_right, size: 18, color: AppColors.textMuted),
-                            ]),
+                              child: Row(children: [
+                                Container(
+                                  width: 4, height: 40,
+                                  decoration: BoxDecoration(color: AppColors.primary, borderRadius: BorderRadius.circular(2)),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                  Text(a.judul, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600), maxLines: 1, overflow: TextOverflow.ellipsis),
+                                  const SizedBox(height: 3),
+                                  Text(a.timeAgo, style: TextStyle(fontSize: 11, color: AppColors.textMuted)),
+                                ])),
+                                Icon(Icons.chevron_right, size: 18, color: AppColors.textMuted),
+                              ]),
+                            ),
                           );
                         }).toList(),
                       );
@@ -266,6 +272,7 @@ class StudentDashboardPage extends ConsumerWidget {
             ),
           ],
         ),
+      ),
       ),
     );
   }

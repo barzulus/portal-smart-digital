@@ -1,64 +1,93 @@
+import 'dart:convert';
+
+import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../../core/constants/api_constants.dart';
+import '../../../core/network/dio_client.dart';
+import '../../../core/storage/offline_cache_service.dart';
+import '../../auth/presentation/providers/auth_provider.dart';
 
 class ReligiousActivity {
   final String id;
   final String title;
   final String description;
-  final String day;
-  final String time;
+  final String? day;
+  final String? time;
   final String location;
-  final String category;
-  final bool isMandatory;
+  final String status;
 
   const ReligiousActivity({
     required this.id,
     required this.title,
     required this.description,
-    required this.day,
-    required this.time,
+    this.day,
+    this.time,
     required this.location,
-    required this.category,
-    required this.isMandatory,
+    required this.status,
   });
+
+  factory ReligiousActivity.fromJson(Map<String, dynamic> json) {
+    // Format tanggal as day name if available
+    String? day;
+    final tanggal = json['tanggal']?.toString();
+    if (tanggal != null && tanggal.isNotEmpty) {
+      final date = DateTime.tryParse(tanggal);
+      if (date != null) {
+        const days = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'];
+        day = days[date.weekday - 1];
+      }
+    }
+
+    return ReligiousActivity(
+      id: json['id']?.toString() ?? '',
+      title: json['nama_kegiatan']?.toString() ?? '',
+      description: json['deskripsi']?.toString() ?? '',
+      day: day,
+      time: json['waktu']?.toString(),
+      location: json['lokasi']?.toString() ?? '-',
+      status: json['status']?.toString() ?? 'Terjadwal',
+    );
+  }
 }
 
-final religiousActivitiesProvider = FutureProvider<List<ReligiousActivity>>((ref) async {
-  await Future.delayed(const Duration(milliseconds: 400));
-  return const [
-    ReligiousActivity(
-      id: '1', title: 'Shalat Dhuha Berjamaah', description: 'Shalat Dhuha bersama di Musholla sekolah',
-      day: 'Setiap Hari', time: '09:00 - 09:15', location: 'Musholla Al-Hikmah',
-      category: 'Ibadah', isMandatory: true,
-    ),
-    ReligiousActivity(
-      id: '2', title: 'Shalat Dzuhur Berjamaah', description: 'Shalat Dzuhur berjamaah wajib untuk seluruh siswa',
-      day: 'Setiap Hari', time: '12:00 - 12:30', location: 'Musholla Al-Hikmah',
-      category: 'Ibadah', isMandatory: true,
-    ),
-    ReligiousActivity(
-      id: '3', title: 'Kajian Jumat', description: 'Kajian Islam mingguan dengan tema akhlak mulia',
-      day: 'Jumat', time: '11:00 - 11:45', location: 'Aula Sekolah',
-      category: 'Kajian', isMandatory: true,
-    ),
-    ReligiousActivity(
-      id: '4', title: 'Tahfidz Al-Quran', description: 'Program hafalan Al-Quran Juz 30',
-      day: 'Senin, Rabu', time: '06:30 - 07:15', location: 'Musholla Al-Hikmah',
-      category: 'Tahfidz', isMandatory: false,
-    ),
-    ReligiousActivity(
-      id: '5', title: 'Mentoring Keislaman', description: 'Mentoring kelompok kecil tentang fiqih dan akidah',
-      day: 'Selasa', time: '15:00 - 16:00', location: 'Ruang Kelas',
-      category: 'Mentoring', isMandatory: false,
-    ),
-    ReligiousActivity(
-      id: '6', title: 'Baca Tulis Al-Quran (BTQ)', description: 'Bimbingan membaca dan menulis Al-Quran',
-      day: 'Kamis', time: '15:00 - 16:00', location: 'Musholla Al-Hikmah',
-      category: 'BTQ', isMandatory: true,
-    ),
-    ReligiousActivity(
-      id: '7', title: 'Infaq Jumat', description: 'Program infaq mingguan untuk kegiatan sosial',
-      day: 'Jumat', time: '07:15 - 07:30', location: 'Kelas Masing-masing',
-      category: 'Sosial', isMandatory: false,
-    ),
-  ];
+/// Fetch kegiatan keagamaan sekolah (untuk siswa — read only).
+/// Tabel: kegiatan_keagamaan, filter by id_sekolah.
+final religiousActivitiesProvider =
+    FutureProvider<List<ReligiousActivity>>((ref) async {
+  final idSekolah = ref.watch(currentIdSekolahProvider);
+  if (idSekolah == null) return const [];
+
+  final cache = ref.watch(offlineCacheServiceProvider);
+  final cacheKey = 'religious_$idSekolah';
+
+  try {
+    final dio = ref.watch(dioClientProvider);
+    final res = await dio.get(
+      ApiConstants.kegiatanKeagamaanTable,
+      queryParameters: {
+        'id_sekolah': 'eq.$idSekolah',
+        'select': '*',
+        'order': 'tanggal.desc.nullslast,created_at.desc',
+      },
+    );
+
+    final List data = res.data is List ? res.data : [];
+    // Cache the raw response
+    await cache.cacheResponse(cacheKey, jsonEncode(data));
+    return data
+        .map((json) => ReligiousActivity.fromJson(json as Map<String, dynamic>))
+        .toList();
+  } on DioException catch (e) {
+    // Offline — try cache
+    final cached = await cache.getCachedResponse(cacheKey);
+    if (cached != null) {
+      final List decoded = jsonDecode(cached);
+      return decoded
+          .map((json) => ReligiousActivity.fromJson(json as Map<String, dynamic>))
+          .toList();
+    }
+    if (e.response?.statusCode == 404) return const [];
+    throw Exception('Gagal memuat kegiatan: ${e.message ?? 'tidak diketahui'}');
+  }
 });

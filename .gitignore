@@ -47,3 +47,16 @@ app.*.map.json
 # Environment secrets
 .env
 *.env
+
+# AI tools
+.kiro/
+
+# Android build cache
+android/build/
+
+# Internal notes & sensitive setup
+test_insert.json
+pemberitahuan.txt
+rls_setup.sql
+database.sql
+database_schema.md

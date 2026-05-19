@@ -51,11 +51,13 @@ class AuthState {
     AuthStatus? status,
     UserEntity? user,
     String? errorMessage,
+    bool clearUser = false,
+    bool clearError = false,
   }) {
     return AuthState(
       status: status ?? this.status,
-      user: user ?? this.user,
-      errorMessage: errorMessage,
+      user: clearUser ? null : (user ?? this.user),
+      errorMessage: clearError ? null : (errorMessage ?? this.errorMessage),
     );
   }
 }
@@ -110,7 +112,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
     required String password,
     required bool rememberMe,
   }) async {
-    state = state.copyWith(status: AuthStatus.loading, errorMessage: null);
+    state = state.copyWith(status: AuthStatus.loading, clearError: true);
 
     try {
       // Save remember me preference

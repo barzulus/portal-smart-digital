@@ -96,4 +96,8 @@ class AppColors {
     colors: [Color(0xFF8D6E63), Color(0xFFA1887F)],
     begin: Alignment.topLeft, end: Alignment.bottomRight,
   );
+  static const LinearGradient absenGuruGradient = LinearGradient(
+    colors: [Color(0xFF00897B), Color(0xFF4DB6AC)],
+    begin: Alignment.topLeft, end: Alignment.bottomRight,
+  );
 }

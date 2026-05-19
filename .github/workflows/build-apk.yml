@@ -30,6 +30,11 @@ jobs:
           channel: 'stable'
           cache: true
 
+      - name: Create .env file
+        run: |
+          echo "SUPABASE_URL=${{ secrets.SUPABASE_URL }}" > .env
+          echo "SUPABASE_ANON_KEY=${{ secrets.SUPABASE_ANON_KEY }}" >> .env
+
       - name: Get dependencies
         run: flutter pub get
 
@@ -52,9 +57,9 @@ jobs:
         with:
           files: build/app/outputs/flutter-apk/portal-smart-digital.apk
           generate_release_notes: true
-          name: "Portal Smart Digital Release"
+          name: "Portal Smart Digital ${{ github.ref_name }}"
           body: |
-            ## 📱 Portal Smart Digital
+            ## 📱 Portal Smart Digital ${{ github.ref_name }}
             
             Download APK di bawah untuk install di HP Android.
             
@@ -63,5 +68,8 @@ jobs:
             2. Buka file tersebut di HP Android
             3. Jika diminta izin "Install dari sumber tidak dikenal", aktifkan
             4. Ikuti instruksi instalasi
+            
+            ### Changelog:
+            Lihat daftar perubahan di Release Notes yang di-generate otomatis di bawah.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

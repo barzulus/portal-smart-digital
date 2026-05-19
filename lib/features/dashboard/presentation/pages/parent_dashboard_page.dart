@@ -30,19 +30,19 @@ class ParentDashboardPage extends ConsumerWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Child info card
+                  // Child info card — TODO: fetch data anak dari relasi parent→student
                   Container(
                     width: double.infinity, padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14),
                       boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8, offset: const Offset(0, 2))]),
                     child: Row(children: [
                       CircleAvatar(radius: 22, backgroundColor: AppColors.siswaColor.withOpacity(0.1),
-                        child: const Text('A', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: AppColors.siswaColor))),
+                        child: Icon(Icons.child_care_rounded, color: AppColors.siswaColor, size: 22)),
                       const SizedBox(width: 12),
                       Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        const Text('Ahmad Fauzi Rahman', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+                        Text('Data anak belum tersedia', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
                         const SizedBox(height: 3),
-                        Text('Kelas VII-A  •  NIS: 2024001', style: TextStyle(fontSize: 12, color: AppColors.textMuted)),
+                        Text('Hubungi admin untuk menghubungkan akun', style: TextStyle(fontSize: 12, color: AppColors.textMuted)),
                       ])),
                     ]),
                   ),
@@ -69,21 +69,15 @@ class ParentDashboardPage extends ConsumerWidget {
                     error: (_, __) => const SizedBox(),
                     data: (list) => Column(
                       children: list.take(3).map((a) {
-                        Color c;
-                        switch (a.category) {
-                          case AnnouncementCategory.important: c = AppColors.error; break;
-                          case AnnouncementCategory.event: c = AppColors.secondary; break;
-                          case AnnouncementCategory.info: c = AppColors.info; break;
-                        }
                         return Container(
                           margin: const EdgeInsets.only(bottom: 10), padding: const EdgeInsets.all(14),
                           decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14),
                             boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 6, offset: const Offset(0, 2))]),
                           child: Row(children: [
-                            Container(width: 4, height: 40, decoration: BoxDecoration(color: c, borderRadius: BorderRadius.circular(2))),
+                            Container(width: 4, height: 40, decoration: BoxDecoration(color: AppColors.primary, borderRadius: BorderRadius.circular(2))),
                             const SizedBox(width: 12),
                             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                              Text(a.title, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600), maxLines: 1, overflow: TextOverflow.ellipsis),
+                              Text(a.judul, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600), maxLines: 1, overflow: TextOverflow.ellipsis),
                               const SizedBox(height: 3),
                               Text(a.timeAgo, style: TextStyle(fontSize: 11, color: AppColors.textMuted)),
                             ])),

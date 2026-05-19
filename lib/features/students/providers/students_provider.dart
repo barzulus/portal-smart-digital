@@ -1,7 +1,11 @@
+import 'dart:convert';
+
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/network/dio_client.dart';
 import '../../../core/constants/api_constants.dart';
+import '../../../core/storage/offline_cache_service.dart';
+import '../../auth/presentation/providers/auth_provider.dart';
 import '../../schedule/providers/schedule_provider.dart';
 
 /// Model for student data from Supabase
@@ -49,20 +53,21 @@ class StudentData {
   }
 }
 
-/// Toggle: set to true for mock data during development
-const bool _useMockStudents = false;
-
-/// Provider that fetches ALL students from Supabase
+/// Provider that fetches students for the current school.
+/// Always filters by `id_sekolah` to keep multi-tenant isolation.
 final studentsProvider = FutureProvider<List<StudentData>>((ref) async {
-  if (_useMockStudents) {
-    return _getMockStudents();
-  }
+  final idSekolah = ref.watch(currentIdSekolahProvider);
+  if (idSekolah == null) return const [];
+
+  final cache = ref.watch(offlineCacheServiceProvider);
+  final cacheKey = 'students_$idSekolah';
 
   try {
     final dioClient = ref.watch(dioClientProvider);
     final response = await dioClient.get(
       ApiConstants.studentsTable,
       queryParameters: {
+        'id_sekolah': 'eq.$idSekolah',
         'select': '*',
         'order': 'nama_siswa.asc',
       },
@@ -73,10 +78,20 @@ final studentsProvider = FutureProvider<List<StudentData>>((ref) async {
     }
 
     final List data = response.data is List ? response.data : [];
+    // Cache the raw response
+    await cache.cacheResponse(cacheKey, jsonEncode(data));
     return data
         .map((json) => StudentData.fromJson(json as Map<String, dynamic>))
         .toList();
   } on DioException catch (e) {
+    // Offline — try cache
+    final cached = await cache.getCachedResponse(cacheKey);
+    if (cached != null) {
+      final List decoded = jsonDecode(cached);
+      return decoded
+          .map((json) => StudentData.fromJson(json as Map<String, dynamic>))
+          .toList();
+    }
     if (e.type == DioExceptionType.connectionTimeout ||
         e.type == DioExceptionType.receiveTimeout) {
       throw Exception('Koneksi timeout. Periksa jaringan Anda.');
@@ -95,13 +110,19 @@ final studentsProvider = FutureProvider<List<StudentData>>((ref) async {
   }
 });
 
-/// Provider that returns ONLY students from classes the teacher teaches
-/// Uses jadwal_pelajaran to determine which classes belong to this teacher
+/// Normalisasi nama kelas untuk matching lintas sumber data.
+/// Contoh: "XI DKV" vs "XI-DKV" vs "xi dkv" → semua jadi "XIDKV".
+String _normalizeKelas(String s) =>
+    s.toUpperCase().replaceAll(RegExp(r'[\s\-_/.]+'), '');
+
+/// Provider that returns ONLY students from classes the teacher teaches.
+/// Matching kelas dilakukan dengan normalisasi supaya tahan terhadap
+/// variasi spasi/dash/case antara `jadwal_pelajaran_v2.kelas` dan
+/// `students.kelas`.
 final myStudentsProvider = Provider<AsyncValue<List<StudentData>>>((ref) {
   final allStudents = ref.watch(studentsProvider);
   final teacherClasses = ref.watch(teacherClassesProvider);
 
-  // Combine both async values
   return teacherClasses.when(
     loading: () => const AsyncValue.loading(),
     error: (e, st) => AsyncValue.error(e, st),
@@ -110,79 +131,11 @@ final myStudentsProvider = Provider<AsyncValue<List<StudentData>>>((ref) {
         return const AsyncValue.data([]);
       }
       return allStudents.whenData((students) {
-        final classSet = classes.toSet();
-        return students.where((s) => classSet.contains(s.kelas)).toList();
+        final normalized = classes.map(_normalizeKelas).toSet();
+        return students
+            .where((s) => normalized.contains(_normalizeKelas(s.kelas)))
+            .toList();
       });
     },
   );
 });
-
-/// Mock student data for development/demo
-List<StudentData> _getMockStudents() {
-  return [
-    StudentData(
-      id: '1', nis: '2024001', nisn: '0012345601',
-      namaSiswa: 'Ahmad Fauzi Rahman', jenisKelamin: 'Laki-laki',
-      alamat: 'Jl. Sudirman No. 45, Jakarta Selatan',
-      tempatLahir: 'Jakarta', tanggalLahir: '2010-03-15',
-      namaOrangTua: 'Budi Rahman', noTelpOrangTua: '081234567890',
-      kelas: 'VII-A',
-    ),
-    StudentData(
-      id: '2', nis: '2024002', nisn: '0012345602',
-      namaSiswa: 'Siti Aisyah Putri', jenisKelamin: 'Perempuan',
-      alamat: 'Jl. Gatot Subroto No. 12, Jakarta Pusat',
-      tempatLahir: 'Bandung', tanggalLahir: '2010-07-22',
-      namaOrangTua: 'Hendra Wijaya', noTelpOrangTua: '081234567891',
-      kelas: 'VII-A',
-    ),
-    StudentData(
-      id: '3', nis: '2024003', nisn: '0012345603',
-      namaSiswa: 'Muhammad Rizki Pratama', jenisKelamin: 'Laki-laki',
-      alamat: 'Jl. Thamrin No. 88, Jakarta Pusat',
-      tempatLahir: 'Surabaya', tanggalLahir: '2010-01-10',
-      namaOrangTua: 'Agus Pratama', noTelpOrangTua: '081234567892',
-      kelas: 'VII-B',
-    ),
-    StudentData(
-      id: '4', nis: '2024004', nisn: '0012345604',
-      namaSiswa: 'Fatimah Azzahra', jenisKelamin: 'Perempuan',
-      alamat: 'Jl. Kuningan No. 33, Jakarta Selatan',
-      tempatLahir: 'Yogyakarta', tanggalLahir: '2010-11-05',
-      namaOrangTua: 'Ahmad Faisal', noTelpOrangTua: '081234567893',
-      kelas: 'VII-B',
-    ),
-    StudentData(
-      id: '5', nis: '2024005', nisn: '0012345605',
-      namaSiswa: 'Dimas Arya Putra', jenisKelamin: 'Laki-laki',
-      alamat: 'Jl. Rasuna Said No. 7, Jakarta Selatan',
-      tempatLahir: 'Semarang', tanggalLahir: '2010-05-28',
-      namaOrangTua: 'Wahyu Putra', noTelpOrangTua: '081234567894',
-      kelas: 'VII-A',
-    ),
-    StudentData(
-      id: '6', nis: '2024006', nisn: '0012345606',
-      namaSiswa: 'Nur Hidayah', jenisKelamin: 'Perempuan',
-      alamat: 'Jl. Casablanca No. 55, Jakarta Selatan',
-      tempatLahir: 'Medan', tanggalLahir: '2010-09-14',
-      namaOrangTua: 'Irwan Hidayat', noTelpOrangTua: '081234567895',
-      kelas: 'VII-C',
-    ),
-    StudentData(
-      id: '7', nis: '2024007', nisn: '0012345607',
-      namaSiswa: 'Rafi Aditya Nugraha', jenisKelamin: 'Laki-laki',
-      alamat: 'Jl. Kemang Raya No. 21, Jakarta Selatan',
-      tempatLahir: 'Jakarta', tanggalLahir: '2010-12-01',
-      namaOrangTua: 'Deni Nugraha', noTelpOrangTua: '081234567896',
-      kelas: 'VII-C',
-    ),
-    StudentData(
-      id: '8', nis: '2024008', nisn: '0012345608',
-      namaSiswa: 'Zahra Amelia Putri', jenisKelamin: 'Perempuan',
-      alamat: 'Jl. Senayan No. 9, Jakarta Selatan',
-      tempatLahir: 'Bogor', tanggalLahir: '2010-04-18',
-      namaOrangTua: 'Rizal Amelia', noTelpOrangTua: '081234567897',
-      kelas: 'VII-A',
-    ),
-  ];
-}
