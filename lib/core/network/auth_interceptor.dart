@@ -2,13 +2,18 @@ import 'package:dio/dio.dart';
 import '../constants/api_constants.dart';
 import '../storage/secure_storage_service.dart';
 
-/// Interceptor yang attach JWT token ke setiap request.
+/// Interceptor yang attach token ke setiap request.
 ///
-/// Karena aplikasi saat ini pakai custom auth (bukan Supabase Auth), token
-/// yang disimpan di secure storage adalah placeholder seperti
-/// `simulated_jwt_*` atau `mock_jwt_*` (dari versi lama). Semuanya
-/// di-treat sebagai "bukan JWT Supabase Auth asli" — di-fallback ke anon key
-/// supaya PostgREST tetap menerima request.
+/// Karena aplikasi pakai custom auth (bukan Supabase Auth), token yang
+/// disimpan di secure storage adalah placeholder seperti `simulated_jwt_*`
+/// atau `mock_jwt_*` — bukan JWT Supabase Auth asli. Untuk request semacam
+/// itu kita FALLBACK ke publishable anon key di header `Authorization` agar
+/// PostgREST tetap men-resolve role anon dengan benar.
+///
+/// Catatan: walau publishable key (`sb_publishable_*`) bukan JWT, Supabase
+/// menerimanya pada header `Authorization: Bearer <key>` untuk role anon.
+/// Pola lama ini terbukti bekerja; jangan dihapus tanpa migrasi penuh ke
+/// Supabase Auth.
 class AuthInterceptor extends Interceptor {
   final SecureStorageService storageService;
 
@@ -38,12 +43,13 @@ class AuthInterceptor extends Interceptor {
     final token = await storageService.getAccessToken();
 
     if (token != null && token.isNotEmpty && !_isSimulatedToken(token)) {
-      // JWT asli dari Supabase Auth.
+      // JWT asli dari Supabase Auth → set sebagai Bearer.
       options.headers['Authorization'] = 'Bearer $token';
     } else {
-      // Simulated / placeholder / tidak ada token → pakai anon key.
-      // PostgREST butuh Authorization untuk role mapping; tanpa header
-      // ini di Supabase mode tertentu request bisa ditolak 401.
+      // Simulated / no JWT → pakai publishable anon key sebagai Bearer.
+      // PostgREST akan resolve role `anon` dari kombinasi header `apikey`
+      // + `Authorization`. Tanpa Authorization sama sekali request bisa
+      // ditolak 400 oleh konfigurasi Supabase tertentu.
       options.headers['Authorization'] =
           'Bearer ${ApiConstants.supabaseAnonKey}';
     }

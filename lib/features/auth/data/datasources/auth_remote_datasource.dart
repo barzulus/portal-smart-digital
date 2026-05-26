@@ -34,12 +34,23 @@ class AuthRemoteDataSource {
     required String password,
   }) async {
     try {
-      // 1. Validasi Kode Sekolah dan ambil id_sekolah
+      // Trim input dulu — user kadang input dengan trailing spaces.
+      final kodeTrimmed = kodeSekolah.trim();
+      final normalizedEmail = email.trim().toLowerCase();
+
+      if (kodeTrimmed.isEmpty || normalizedEmail.isEmpty || password.isEmpty) {
+        throw const AuthException(
+          message: 'Kode sekolah, email, dan password wajib diisi.',
+        );
+      }
+
+      // 1. Validasi Kode Sekolah. Ambil `id` (UUID) dan `id_sekolah` (kode
+      //    text). Filter pakai `id_sekolah` text yang diketik user.
       final schoolResponse = await dioClient.get(
         '/schools',
         queryParameters: {
-          'id_sekolah': 'eq.$kodeSekolah',
-          'select': 'id_sekolah',
+          'id_sekolah': 'eq.$kodeTrimmed',
+          'select': 'id,id_sekolah',
         },
       );
 
@@ -49,17 +60,22 @@ class AuthRemoteDataSource {
         throw const AuthException(
             message: 'Kode sekolah tidak valid atau tidak terdaftar.');
       }
-      final schoolId = schoolData.first['id_sekolah'];
+      final schoolUuid = schoolData.first['id']?.toString();
+      final schoolKode = schoolData.first['id_sekolah']?.toString();
 
-      // 2. Query users table — TARIK by email + id_sekolah saja, password
-      //    DIBANDINGKAN DI CLIENT supaya tidak pernah jadi bagian URL/log.
-      //    (URL bisa ke-log di proxy / interceptor / crash report.)
-      final normalizedEmail = email.trim().toLowerCase();
+      // 2. Query users by email saja. Email punya UNIQUE constraint di DB
+      //    sehingga tidak perlu filter sekolah di sini. Sebagian row di
+      //    tabel `users` punya `id_sekolah` null (tidak konsisten di-populate
+      //    untuk semua role) — kalau kita filter pakai itu, login bakal
+      //    selalu gagal walau credential benar. Verifikasi keanggotaan
+      //    sekolah dilakukan pasca-login lewat tabel role-spesifik
+      //    (students / guru_staff) di repository.
+      //    Password DIBANDINGKAN DI CLIENT supaya tidak pernah jadi bagian
+      //    URL/log.
       final response = await dioClient.get(
         ApiConstants.usersTable,
         queryParameters: {
           'email': 'eq.$normalizedEmail',
-          'id_sekolah': 'eq.$schoolId',
           'select': '*',
           'limit': '1',
         },
@@ -67,8 +83,6 @@ class AuthRemoteDataSource {
 
       final List data = response.data is List ? response.data : [];
 
-      // Pakai pesan yang sama untuk semua kegagalan kredensial supaya
-      // tidak bocor info "email ada tapi password salah".
       const credErr = AuthException(
         message:
             'Email atau password salah, atau Anda tidak terdaftar di sekolah ini.',
@@ -79,7 +93,6 @@ class AuthRemoteDataSource {
       final user = data.first as Map<String, dynamic>;
       final storedHash = user['password_hash']?.toString() ?? '';
 
-      // Constant-time compare → tidak rentan terhadap timing attack.
       if (storedHash.isEmpty || !_constantTimeEquals(storedHash, password)) {
         throw credErr;
       }
@@ -93,7 +106,6 @@ class AuthRemoteDataSource {
         mappedRole = 'orangtua';
       }
 
-      // JWT simulasi — belum Supabase Auth asli.
       return {
         'access_token': 'simulated_jwt_${user['id']}',
         'refresh_token': null,
@@ -103,10 +115,17 @@ class AuthRemoteDataSource {
           'name': user['nama_user'] ?? user['email'],
           'role': mappedRole,
           'avatar_url': user['foto_profile'],
-          'id_sekolah': schoolId?.toString(),
+          // `id_sekolah` di payload user kita pakai kode text (`SCH0005`)
+          // — itu yang dipakai semua query downstream (students, jadwal, dll).
+          'id_sekolah': schoolKode,
+          'school_uuid': schoolUuid,
           'created_at': user['created_at'],
         },
       };
+    } on AuthException {
+      // Kalau sudah AuthException (kode sekolah salah / kredensial salah),
+      // lempar lagi tanpa di-wrap jadi ServerException.
+      rethrow;
     } on DioException catch (e) {
       if (e.type == DioExceptionType.connectionTimeout ||
           e.type == DioExceptionType.receiveTimeout) {
@@ -114,9 +133,33 @@ class AuthRemoteDataSource {
           message: 'Koneksi timeout. Coba lagi nanti.',
         );
       }
+      // Translate beberapa status umum ke pesan user-friendly.
+      final status = e.response?.statusCode;
+      if (status == 400) {
+        throw const ServerException(
+          message:
+              'Format input tidak valid. Pastikan kode sekolah, email, '
+              'dan password Anda benar.',
+          statusCode: 400,
+        );
+      }
+      if (status == 401 || status == 403) {
+        throw const ServerException(
+          message:
+              'Akses ke server ditolak. Hubungi admin sekolah untuk '
+              'memeriksa konfigurasi izin database.',
+          statusCode: 401,
+        );
+      }
+      if (status == 404) {
+        throw const ServerException(
+          message: 'Endpoint tidak ditemukan. Hubungi admin sekolah.',
+          statusCode: 404,
+        );
+      }
       throw ServerException(
-        message: e.message ?? 'Gagal login.',
-        statusCode: e.response?.statusCode,
+        message: 'Gagal login. ${e.message ?? 'Periksa koneksi internet Anda.'}',
+        statusCode: status,
       );
     }
   }
